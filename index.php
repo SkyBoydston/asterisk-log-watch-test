@@ -32,7 +32,7 @@ if (file_exists('log_placeholder.txt') && strlen($log) <= 100000000) {
 	$placeholder = file_get_contents('log_placeholder.txt', false, null, 0, 19); // Making sure it doesn't pick up an extra newline or anything else.
 	$pattern = "/.*" . str_replace(' ', '\s', $placeholder) . "/s";
 	ini_set('pcre.backtrack_limit', '100000000');
-	$log = preg_replace($pattern, '', $log);
+	$log = preg_replace($pattern, '', $log); // Cutting out any portion of the log that's already been processed on a previous run of this script.
 } else {
 	$placeholder = 0;
 }
@@ -73,73 +73,19 @@ if (!empty($notices)) {
 		array_push($suspect_ips, $ip);
 	}
 
-	function array_unique_right($array)
+
+	/* This function makes it possible to create an array of only the unique IP's
+	 * while retaining the indices of their last occurrence. This will be valuable 
+	 * later when the script needs to know the time of the latest login failure 
+	 * occurrence.
+	*/
+
+	function array_unique_right($array) 
 	{
-	  return array_reverse(array_unique(array_reverse($array, true)), true);
+	  return array_reverse(array_unique(array_reverse($array, true)), true); // True's ensure that indices are retained.
 	}
 
 	$suspect_ips = array_unique_right($suspect_ips);
-
-
-
-
-
-
-
-	// Get the latest time at which there was a suspect IP. This is possible because array_unique() above keeps the original keys in the array
-	// that we can then use to trace back and see what time the notice was logged. That could be one of the earlier log entries for that IP
-	// or a later one; it's not known which but it's also not necessary to know. Whether it's an earlier entry or later one, the second to last
-	// in the list can give us a starting point for our search on the next run. Knowing its exact time stamp is helpful in finding the exact
-	// place in the log file to start removing log entries. That way they don't have to be checked for suspect IP's and that offers a little 
-	// performance boost.
-
-	$times = array();
-	foreach ($notices as $key => $value) {
-		$time = array();
-
-		preg_match_all('/\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}/', $value, $time);
-
-		$time = $time[0][0];  
-		
-		array_push($times, $time);
-	}
-
-	$times_of_suspect_ips = array();
-	foreach ($suspect_ips as $key => $value) {
-		$times_of_suspect_ips[] = $times[$key];
-	}
-
-	$time_of_latest_suspect = end($times_of_suspect_ips);
-	while (($time_of_latest_suspect == end($times_of_suspect_ips)) && (count($times_of_suspect_ips) > 1)) {
-		array_pop($times_of_suspect_ips);
-	}
-
-
-	if (($time_of_latest_suspect != end($times_of_suspect_ips)) && (count($times_of_suspect_ips) > 1)){
-		$time_of_second_latest_suspect = end($times_of_suspect_ips);  
-	} elseif (($time_of_latest_suspect != end($times_of_suspect_ips)) && (count($times_of_suspect_ips) == 1)){
-		$time_of_second_latest_suspect = end($times_of_suspect_ips);  
-	} elseif (($time_of_latest_suspect == end($times_of_suspect_ips)) && (count($times_of_suspect_ips) == 1)) {
-		$time_of_second_latest_suspect = null;
-	}
-
-
-
-
-
-
-	// Store the latest suspect's time so for use on the next run of this script.
-
-	if ($time_of_second_latest_suspect != null ) {
-		if ($time_of_second_latest_suspect >= $placeholder) {
-	$log_placeholder = fopen('log_placeholder.txt', 'w');
-			echo 'placeholder before write is <br>';
-			echo $placeholder;
-			fwrite($log_placeholder, $time_of_second_latest_suspect);
-	fclose($log_placeholder);
-		}
-	}
-
 
 
 
@@ -165,15 +111,15 @@ if (!empty($notices)) {
 
 
 
-	// // Mail out for each ip to alert on. This would ideally be set up into a queue.
+	// Mail out for each ip to alert on. This would ideally be set up into a queue.
 
-	// $to = 'kevin@networxonline.com';
-	// $subject = 'A suspect IP is trying to access your server';
+	$to = 'kevin@networxonline.com';
+	$subject = 'A suspect IP is trying to access your server';
 
-	// foreach ($ips_to_alert as $key => $value) {
-	// 	$message = 'IP address ' . $value . ' is trying to register on host PBX-2.';
-	// 	mail($to, $subject, $message, $from);
-	// }
+	foreach ($ips_to_alert as $key => $value) {
+		$message = 'IP address ' . $value . ' is trying to register on host PBX-2.';
+		mail($to, $subject, $message, $from);
+	}
 
 
 
@@ -183,11 +129,71 @@ if (!empty($notices)) {
 
 	// Record the IP's that were just alerted on so that they don't get alerted on again.
 
-	$file_location = fopen('previously_alerted.txt', 'a');
+	$file_location = fopen('previously_alerted.txt', 'a'); // Creates if it doesn't exist.
 
 	foreach ($ips_to_alert as $key => $value) {
 		fwrite($file_location, $value . "\r\n");
 	}
 	fclose($file_location);
+
+
+
+
+
+
+	/* Get the latest time at which there was a suspect IP. This is possible because 
+	 * array_unique_right() above keeps the original keys in the array that the script can 
+	 * then use to trace back and see what time the notice was logged. The second 
+	 * to last intrusion attempt can (because the script determines order
+	 * by ordinals of seconds) provide a starting point for the next run of the 
+	 * script, ensuring a little bit of overlap in case the script began to run before all the log 
+	 * entries were finished for the second in which it began. 
+	*/ 
+	
+	$times = array();  // Get all times of all notices.
+	foreach ($notices as $key => $value) {
+		$time = array();
+
+		preg_match_all('/\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}/', $value, $time);
+
+		$time = $time[0][0];  
+		
+		array_push($times, $time);
+	}
+
+	$times_of_suspect_ips = array();  // Pare that down to just the last times the suspect IP's tried to log in.
+	foreach ($suspect_ips as $key => $value) {
+		$times_of_suspect_ips[] = $times[$key];
+	}
+
+
+
+
+
+
+	// Store the second latest suspect's time for use on the next run of this script.
+
+	$time_of_latest_suspect = end($times_of_suspect_ips);
+	while (($time_of_latest_suspect == end($times_of_suspect_ips)) && (count($times_of_suspect_ips) > 1)) {
+		array_pop($times_of_suspect_ips);
+	}
+
+	if (($time_of_latest_suspect != end($times_of_suspect_ips)) && (count($times_of_suspect_ips) > 1)){
+		$time_of_second_latest_suspect = end($times_of_suspect_ips);  
+	} elseif (($time_of_latest_suspect != end($times_of_suspect_ips)) && (count($times_of_suspect_ips) == 1)){
+		$time_of_second_latest_suspect = end($times_of_suspect_ips);  
+	} elseif (($time_of_latest_suspect == end($times_of_suspect_ips)) && (count($times_of_suspect_ips) == 1)) {
+		$time_of_second_latest_suspect = null;
+	}
+
+	if ($time_of_second_latest_suspect != null ) {
+		if ($time_of_second_latest_suspect >= $placeholder) {
+			$log_placeholder = fopen('log_placeholder.txt', 'w');  // Opens and removes previous data
+			fwrite($log_placeholder, $time_of_second_latest_suspect);
+			fclose($log_placeholder);
+		}
+	}
+
+
 }
 ?>
