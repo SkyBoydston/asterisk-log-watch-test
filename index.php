@@ -1,5 +1,17 @@
 <?php
 
+
+// Test driver -- see additional test output at bottom
+$live = false;
+if (!$live) {
+	if (unlink('log_placeholder.txt')) {
+		echo "log placeholder deleted \n";
+	}
+	if (unlink('previously_alerted.txt')) {
+		echo "previously alerted ips deleted \n";
+	}
+}
+
 /* This is a program that identifies attempts
  * to access a server without permission and 
  * notifies the server owner with the offenders'
@@ -15,17 +27,21 @@ if (file_exists('log.txt')) {
 } elseif (file_exists('full.1')) {
 	$log = file_get_contents('full.1');
 } else {
-	mail('kevin@networxonline.com', 
-		'Log file absence warning', 
-		'Please make sure that a log file that tracks unpermitted attempts to log into host PBX-2 is being generated.', 
-		$from);
+	if ($live) {
+		mail('kevin@networxonline.com', 
+			'Log file absence warning', 
+			'Please make sure that a log file that tracks unpermitted attempts to log into host PBX-2 is being generated.', 
+			$from);
+	}
 }
 
 if (strlen($log) >= 100000000) {  // This is here so that pcre.backtrack_limit doesn't need to be set by variable, which could result in a very large backtrack limit.
-	mail('kevin@networxonline.com', 
-		'Log file size warning', 
-		'Please make sure that log files to track unpermitted attempts to log into host PBX-2 do not exceed 100 million characters in length for optimal performance.', 
-		$from);
+	if ($live) {
+		mail('kevin@networxonline.com', 
+			'Log file size warning', 
+			'Please make sure that log files to track unpermitted attempts to log into host PBX-2 do not exceed 100 million characters in length for optimal performance.', 
+			$from);
+	}
 }
 
 if (file_exists('log_placeholder.txt') && strlen($log) <= 100000000) {
@@ -48,11 +64,11 @@ if (file_exists('log_placeholder.txt') && strlen($log) <= 100000000) {
 // Get together a list of notices.
 
 $notices = array();
-preg_match_all('/\n.*NOTICE\[23697\].*\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}.*\n/', $log, $notices); // This needs to be changed for the final version
+preg_match_all('/\n.*\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}.*Peer\sis\snot\ssupposed\sto\sregister\n/', $log, $notices); // This needs to be changed for the final version
 
 if (!empty($notices)) {
 	$notices = $notices[0];  // Not necessary but convenient because of the way preg_match_all() outputs its results.
-	$notices = array_unique($notices);  // Cutting down the amount of data to process.
+	$notices = array_unique($notices);  // Cutting down the amount of data to process. Only necessary if the script is outputting to the screen, as in a test.
 
 	foreach ($notices as $key => $value) {
 		$value = htmlentities($value);  //Takes care of encoding so that we can see what's going on under the hood.
@@ -112,13 +128,14 @@ if (!empty($notices)) {
 
 
 	// Mail out for each ip to alert on. This would ideally be set up into a queue.
+	if ($live) {
+		$to = 'kevin@networxonline.com';
+		$subject = 'A suspect IP is trying to access your server';
 
-	$to = 'kevin@networxonline.com';
-	$subject = 'A suspect IP is trying to access your server';
-
-	foreach ($ips_to_alert as $key => $value) {
-		$message = 'IP address ' . $value . ' is trying to register on host PBX-2.';
-		mail($to, $subject, $message, $from);
+		foreach ($ips_to_alert as $key => $value) {
+			$message = 'IP address ' . $value . ' is trying to register on host PBX-2.';
+			mail($to, $subject, $message, $from);
+		}
 	}
 
 
@@ -195,5 +212,21 @@ if (!empty($notices)) {
 	}
 
 
+}
+
+// Test driver
+if (!live) {
+	echo '<pre>';
+	echo "notices \n";
+	var_dump($notices);
+	echo "suspect ips \n";
+	var_dump($suspect_ips);
+	echo "times of suspect ips \n";
+	var_dump($times_of_suspect_ips);
+	echo "time of latest suspect \n";
+	var_dump($time_of_latest_suspect);
+	echo "time of second latest suspect \n";
+	var_dump($time_of_second_latest_suspect);
+	echo '</pre>';
 }
 ?>
